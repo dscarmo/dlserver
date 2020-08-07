@@ -1,0 +1,1 @@
+Cache for covid segmentation outputs.

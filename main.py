@@ -1,11 +1,11 @@
 from flask import Flask, render_template, request, send_file
 from werkzeug import secure_filename
-import sys
-sys.path.append("/home/diedre/git/radvid19")
 import subprocess
 import os
+import uuid
+from glob import iglob, glob
 
-from imageio import imwrite, imread
+import nibabel as nib
 
 app = Flask(__name__)
 
@@ -19,18 +19,28 @@ def upload_file():
 def upload_route():
     if request.method == 'POST':
         f = request.files['file']
-        fname = secure_filename(f.filename)
+        fname = str(uuid.uuid1()) + secure_filename(f.filename)
         saved_fname = os.path.join("inputs", fname)
         f.save(saved_fname)
 
         # Process...
         try:
             print('Processing...')
-            im = imread(saved_fname)
+            im = nib.load(saved_fname)
+            aff = im.affine
+            fdata = im.get_fdata()
+            if "nii.gz" not in saved_fname:
+                print("Detected uncompressed input, compressing...")
+                new_saved_fname = os.path.join("inputs", fname.split('.')[0] + ".nii.gz")
+                nib.save(nib.Nifti1Image(fdata, affine=aff), new_saved_fname)
+                os.remove(saved_fname)
+                saved_fname = new_saved_fname
+                print("Compressed version saved and original deleted.")
 
             # Return
-            imwrite(os.path.join("outputs", os.path.basename(saved_fname)), im)
-            print("Saved processed file.")
+            subprocess.run(["python3", "/home/diedre/git/radvid19/predict.py", "-m", "/home/diedre/git/radvid19/models",
+                            "-i", saved_fname, "-o", "outputs", "--compress", "--cpus", '1'])
+
         except Exception as e:
             return str(e)
 
@@ -40,7 +50,16 @@ def upload_route():
 @app.route('/return_processed/')
 def return_processed():
     try:
-        return send_file("processed.png", attachment_filename="processed.png")
+        print("Preparing results...")
+        if os.path.isfile("processed.zip"):
+            os.remove("processed.zip")
+        subprocess.run(["zip", "-r", "processed.zip", "outputs"])
+        for path in iglob(os.path.join("outputs", "**", "*.nii*"), recursive=True):
+            os.remove(path)
+        for path in glob(os.path.join("inputs", "*.nii*")):
+            os.remove(path)
+        print("Done.")
+        return send_file("processed.zip", as_attachment=True)
     except Exception as e:
         return str(e)
 

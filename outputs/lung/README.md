@@ -1,0 +1,1 @@
+Cache for lung segmentation outputs.
